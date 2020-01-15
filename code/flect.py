@@ -1,6 +1,8 @@
-def flection(lex_neighb, tags):
-    tags = str(tags)
-    tags = re.sub(',[AGQSPMa-z-]+? ', ',', tags)
+import re
+
+def old_flection(lex_neighb, tags, morph):
+    tags = str(tags).replace(' ', ',')
+    # tags = re.sub(',[AGQSPMa-z-]+? ', ',', tags)
     tags = tags.replace("impf,", "")
     tags = re.sub('([A-Z]) (plur|masc|femn|neut|inan)', '\\1,\\2', tags)
     tags = tags.replace("Impe neut", "")
@@ -14,6 +16,7 @@ def flection(lex_neighb, tags):
                 t = t2
             tags_clean.append(t)
     tags = frozenset(tags_clean)
+    print(tags)
     prep_for_gen = morph.parse(lex_neighb)
     ana_array = []
     for ana in prep_for_gen:
