@@ -1,7 +1,8 @@
 import pymorphy2
-# from enum import Enum
+from enum import Enum
 import logging
 import warnings
+import typing
 import re
 import meanings
 import prefixes
@@ -9,6 +10,8 @@ import prefixes
 vowels = 'ауоыиэяюёе'
 vowels_1 = 'еёюя'
 prefixes_1 = ('вз', 'дез', 'контр', 'пан', 'пост', 'суб', 'супер', 'транс')
+voiced_consonant = 'бвгджзлмнр'
+dumb_consonant = 'пкстфхцчшщ'
 
 
 def hard_sign(pref, letter):
@@ -16,14 +19,19 @@ def hard_sign(pref, letter):
     return letter in vowels_1 and pref[-1] not in vowels
 
 
-def change_letter(pref, letter, type):
+def change_letter(pref, letter, functionality):
     """Предикат 1 - для смены <и> на <ы>
                 2 - для смены <и> на <й>"""
-    if type == 1: # и на ы
-        predicat =  (letter == 'и' and pref not in prefixes_1 and pref[-1] not in vowels)
-    elif type == 2: # и на й
+    predicat = None
+
+    if functionality == 1:  # и на ы
+        predicat = (letter == 'и' and pref not in prefixes_1 and pref[-1] not in vowels)
+    elif functionality == 2:  # и на й
         predicat = (letter == 'и' and pref[-1] in 'иоуыае')
-    return  predicat
+    elif functionality == 3:  # з на с
+        predicat = (pref[-1] == 'з' and letter in dumb_consonant)
+
+    return predicat
 
 
 def check_in_dict(word):
@@ -84,12 +92,25 @@ def create_final_dict(tmp_dict, stat, tags):
                 transformed_word = transform_word(check_word, stat, tags)
                 if transformed_word[0]:
                     arr.append(transformed_word[1])
+            if len(arr) == 1: arr = arr[0]
             tmp_dict[key] = arr if arr else None
         else:
             transformed_word = transform_word(check_words, stat, tags)
             tmp_dict[key] = transformed_word[1] if transformed_word[0] else None
 
     return tmp_dict
+
+
+def create_relations(final_dict, mean_dict):
+    new_pref = dict.fromkeys(mean_dict.keys(), [])
+    for key in new_pref.keys():
+        arr = []
+        for pref in mean_dict[key][1]:
+            val = final_dict.get(pref)
+            if val is not None:
+                arr.append(val)
+        new_pref[key] = arr
+    return new_pref
 
 
 class Word:
@@ -102,29 +123,30 @@ class Word:
         self.normal = variation.normal_form
         self.tags = variation.tag
         self.new_words = []
-        self.create_new()
+        self.inst = self.create_new()
 
     def create_new(self):
         """Вызов подкласса в зависимости от части речи"""
         if self.tags.POS == 'NOUN':  # сущ
-            Noun(self)
+            inst = Noun(self)
         elif self.tags.POS in ('VERB', 'INFN'):  # глагол, инфинитив
-            Verb(self)
+            inst = Verb(self)
         elif self.tags.POS in ('ADJF', 'ADJS', 'COMP'):  # полное/краткое/сравнительное прил
-            Adj(self)
+            inst = Adj(self)
         elif self.tags.POS in ('PRTF', 'PRTS'):  # полное/краткое причастие
-            Prt(self)
+            inst = Prt(self)
         elif self.tags.POS == 'GRND':  # деепричастие
-            Grnd(self)
+            inst = Grnd(self)
         elif self.tags.POS == 'NUMR':  # числительное
-            Numr(self)
+            inst = Numr(self)
         elif self.tags.POS == 'ADVB':  # наречие
-            Advb(self)
+            inst = Advb(self)
         elif self.tags.POS == 'NPRO':  # местоимение
-            Npro(self)
+            inst = Npro(self)
         elif self.tags.POS == 'INTJ':  # междометие
-            Intj(self)
+            inst = Intj(self)
 
+        return inst
 
 class Verb(Word):
 
@@ -134,10 +156,9 @@ class Verb(Word):
                      "bad": 0}
         self.word = word.word
         self.tags = word.tags
-        self.new_pref_words = dict.fromkeys(meanings.verb_pref.keys(), [])
+        self.new_pref_words = []
+
         new_pref = self.pref_relation()
-        print(f"NEW_PREF : {new_pref}")
-        print(self.stat)
 
     def pref_relation(self):
         """Создание префиксальной связи"""
@@ -161,14 +182,19 @@ class Verb(Word):
                 arr.append(key + 'й' + self.word[2:])
                 arr.append(key + 'й' + self.word[1:])
                 tmp[key] = arr
+            elif change_letter(key, letter, 3):
+                arr = [key + self.word, key[:-1] + 'с' + self.word]
+                tmp[key] = arr
             else:
                 tmp[key] = [key + self.word]
 
         for key in remove_keys:
             tmp.pop(key)
-        print(f"TMP : {tmp}")
-        return create_final_dict(tmp, self.stat, self. tags)
 
+        tmp = create_final_dict(tmp, self.stat, self. tags)
+        print(f"PREF_from_verb : {tmp}")
+
+        return create_relations(tmp, meanings.verb_pref)
 
     def suf_relation(self):
         pass
@@ -177,7 +203,14 @@ class Verb(Word):
 class Noun(Word):
     def __init__(self, word: Word):
         print('in Noun')
-        self.new_words = []
+        self.stat = {"good": 0,
+                     "bad": 0}
+        self.word = word.word
+        self.tags = word.tags
+        self.new_pref_words = dict.fromkeys(meanings.verb_pref.keys(), [])
+        new_pref = self.pref_relation()
+        print(f"NEW_PREF : {new_pref}")
+        print(self.stat)
         pass
 
 
@@ -224,6 +257,7 @@ class Intj(Word):
 
 # .is_known
 
+
 def main():
     global morph
     morph = pymorphy2.MorphAnalyzer()
@@ -233,14 +267,16 @@ def main():
     for variation in parsed:
         if variation.is_known:
             instance = Word(variation)
+            print(instance.inst.stat)
             print(variation)
         else:
             print("Incorrect word!")
             break
+
+
 if __name__ == "__main__":
 
     logging.basicConfig(format="►►► %(funcName)s() [LINE:%(lineno)d]} %(message)s ◄◄◄", level=logging.INFO)
     logging.captureWarnings(False)
     warnings.simplefilter("ignore")
     main()
-
