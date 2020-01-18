@@ -1,11 +1,10 @@
 import pymorphy2
-from enum import Enum
 import logging
 import warnings
-import typing
 import re
 import meanings
 import prefixes
+from morphdict import read_json
 
 vowels = 'ауоыиэяюёе'
 vowels_1 = 'еёюя'
@@ -259,6 +258,9 @@ class Intj(Word):
 
 
 def main():
+    morph_dict = read_json(f"../dict/morph_dict.json")
+    roots_dict = read_json(f"../dict/roots_dict.json")
+
     global morph
     morph = pymorphy2.MorphAnalyzer()
     word = input('Word: ')
