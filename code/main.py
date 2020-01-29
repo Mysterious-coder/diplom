@@ -88,27 +88,40 @@ def transform_word(word, stat, grammems=None):
 
 # Часть_Речи, Кол-во_Корней, Слово, [морфемы]
 def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, suff=None):
-    """Создание словаря МОРФЕМА: НОВОЕ СЛОВО"""
-    re_expr = type_dict.get(exp)
+    """Создание словаря МОРФЕМА: НОВОЕ СЛОВО
+    :param tmp_dict: заполняемый словарь
+    :param vocab: слова с совпадающими корнями
+    :param count: кол-во корней
+    :param pos: часть речи выходного слова
+    :param exp: p - режим префиксный, передача суффиксов слова
+                s - режим суффиксный, передача префиксов слова
+                ps - префиксно-суффиксный
+    :param stat: статистика bad/good
+    :param tags: теги слова, поданного на вход
+    :param pref: префиксы слова
+    :param suff: суффиксы слова"""
+    def app_morphem(morphems, exp=exp):
+        inapp_morphem = False
+        if exp == 'p':  # режим префиксный - значит суффиксы должны сохраняться
+            eq_morphem = [morphem[:morphem.find('_')] for morphem in morphems if
+                          re.search(type_dict.get('s'), morphem)]  # суффиксы проверяемого в словаре слова
+            for i in eq_morphem:
+                if i not in suff:
+                    inapp_morphem = True
+        elif exp == 's':  # режим суффиксный - значит префиксы должны сохраняться
+            eq_morphem = [morphem[:morphem.find('_')] for morphem in morphems if
+                          re.search(type_dict.get('p'), morphem)]  # префиксы проверяемого в словаре слова
+            for i in eq_morphem:
+                if i not in pref:
+                    inapp_morphem = True
+        return inapp_morphem
 
+    re_expr = type_dict.get(exp)
     for key in tmp_dict.keys():
         arr = []
         if not isinstance(key, tuple):
             for rec in vocab:
-                inapp_morphem = False
-                if exp == 'p':
-                    eq_morphem = [morphem[:morphem.find('_')] for morphem in rec[3] if
-                                  re.search(type_dict.get('s'), morphem)]
-                    for i in eq_morphem:
-                        if i not in suff:
-                            inapp_morphem = True
-                elif exp == 's':
-                    eq_morphem = [morphem[:morphem.find('_')] for morphem in rec[3] if
-                                  re.search(type_dict.get('p'), morphem)]
-                    for i in eq_morphem:
-                        if i not in pref:
-                            inapp_morphem = True
-                if rec[1] == count and rec[0] in pos and not inapp_morphem:
+                if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
                             check = [morphem[:morphem.find('_')] for morphem in rec[3] if re.search(re_expr, morphem)]
                             if key in check:
                                 transformed_word = transform_word(rec[2], stat, tags)
@@ -116,27 +129,14 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                     arr.append(transformed_word[1])
         else:
             for rec in vocab:
-                inapp_morphem = False
-                if exp == 'p':
-                    eq_morphem = [morphem[:morphem.find('_')] for morphem in rec[3] if
-                                  re.search(type_dict.get('s'), morphem)]
-                    for i in eq_morphem:
-                        if i not in suff:
-                            inapp_morphem = True
-                elif exp == 's':
-                    eq_morphem = [morphem[:morphem.find('_')] for morphem in rec[3] if
-                                  re.search(type_dict.get('p'), morphem)]
-                    for i in eq_morphem:
-                        if i not in pref:
-                            inapp_morphem = True
-                if rec[1] == count and rec[0] in pos and not inapp_morphem:
+                if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
                     check = [morphem[:morphem.find('_')] for morphem in rec[3] if re.search(re_expr, morphem)]
                     flag = True
                     for subkey in key:
                         if subkey not in check:
                             flag = False
                             break
-                    if flag:# and len(check) == len(key):
+                    if flag:  # and len(check) == len(key):
                         transformed_word = transform_word(rec[2], stat, tags)
                         if transformed_word[0]:
                             arr.append(transformed_word[1])
@@ -148,11 +148,14 @@ def create_relations(final_dict, mean_dict):
     new_pref = dict.fromkeys(mean_dict.keys(), [])
     for key in new_pref.keys():
         arr = []
-        for pref in mean_dict[key][1]:
-            val = final_dict.get(pref)
+        # if isinstance(mean_dict[key][1], str):
+        for morphem in mean_dict[key][1]:
+            val = final_dict.get(morphem)
             if val is not None:
                 arr.append(val)
         new_pref[key] = arr
+
+    print(new_pref)
     return new_pref
 
 
@@ -165,14 +168,20 @@ class Word:
         self.word = variation.word
         self.normal = variation.normal_form
         self.parsed = morph_dict.get(self.normal)
+        print(self.parsed)
         self.roots = self.parsed[1]
+        self.other_roots = self.parsed[2]
         self.roots_count = len(self.roots)
         self.vocab = []
+        self.tags = variation.tag
         # self.morph_count = len(self.parsed[0])
         for root in self.roots:
             a = [r for r in roots_dict.get(root) if r[1] == self.roots_count and set(r[4]) == set(self.roots)]
             self.vocab.extend(a)
-        self.tags = variation.tag
+        for root in self.other_roots:  # возможна некорректная выборка из-за условия
+            a = [r for r in roots_dict.get(root) if r[1] == self.roots_count and
+                 set(r[4]).issubset(set(self.other_roots).union(set(self.roots)))]
+            self.vocab.extend(a)
         self.new_words = []
         self.inst = self.create_new()
 
@@ -213,8 +222,8 @@ class Verb(Word):
         self.vocab = word.vocab
         self.tags = word.tags
         self.new_pref_words = []
-        self.word_pref = []
-        self.word_suff = []
+        self.word_pref = []  # префиксы слова
+        self.word_suff = []  # суффиксы слова
         for i in self.parsed[0]:
             if re.search(type_dict.get('p'), i):
                 self.word_pref.append(i[:i.find('_')])
@@ -223,6 +232,7 @@ class Verb(Word):
 
         new_pref = self.pref_relation()
         new_suff = self.suf_relation()
+
     def pref_relation(self):
         """Создание префиксальной связи"""
         prefs = prefixes.verb_prefixes.get("from_verb")
@@ -258,6 +268,7 @@ class Verb(Word):
         print(f"SUFF_from_verb : {tmp}")
 
         return create_relations(tmp, meanings.verb_pref)
+
 
 class Noun(Word):
     def __init__(self, word: Word):
@@ -333,8 +344,7 @@ def main():
        instance = Word(variation)
        print(instance.inst.stat)
     else:
-       print("Incorrect word!")
-
+        print("Incorrect word!")
 
 
 if __name__ == "__main__":

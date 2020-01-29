@@ -1,8 +1,6 @@
 import re
 import logging
-import json
 import pymorphy2
-import typing
 from enum import Enum
 from prefixes import prefs, complex_pref
 from roots import *
@@ -19,6 +17,7 @@ signs = {'ъ', 'ь'}
 
 TEST = True
 CREATE_ROOTS = False
+MANUAL = False
 
 class Check(Enum):
     ALL = suffs
@@ -52,8 +51,9 @@ def parse(filename: str) -> None:
         if CREATE_ROOTS:
             all_roots = dict.fromkeys(aplhabet, set())
         else:
-            all_roots_dict = read_json('../dict/all_roots.json')
+            all_roots = read_json('../dict/all_roots.json')
         complex_part = []
+        manual_list = []
         morph_dict = {}
         roots_dict = {}
         for line in file.readlines():
@@ -62,7 +62,7 @@ def parse(filename: str) -> None:
                 line = line.rstrip('\n')
                 line = line.replace("'", '')
                 line = line.replace(',', ' ')
-                line = line.replace('/-', '/')
+                line = line.replace('/-', '~/')
                 line = line.replace('ё', 'е')
                 arr = line.split(' | ')
                 if arr[0][-1] in '.':
@@ -70,15 +70,17 @@ def parse(filename: str) -> None:
                     complex_part.append(arr[0][:cur])
                     continue
                 try:
+                    arr[1] = arr[1].replace('-', '~/')
                     arr[0] = re.sub(r'[\d]+', '', arr[0])
                     arr[1] = re.match(r"([\S]+)", arr[1]).group(0)
                     arr[1] = re.sub(r'[\d]+', '', arr[1])
                     if arr[1].endswith('ь'):
                         arr[1] = arr[1] + '/'
-                    arr[1] = re.split(r'(?:/|-)', arr[1])
+                    arr[1] = re.split(r'/', arr[1])
                 except:
                     logging.exception(f're-----------{arr}')
                     break
+
                 parsed = morph.parse(arr[0])[0]
                 pos = parsed.tag.POS
                 if pos is None: pos = "ALL"
@@ -87,29 +89,56 @@ def parse(filename: str) -> None:
                 except:
                     logging.exception(f'getattr----------{pos}')
 
+                # определение морфемы перед '-' (который-нибудь : ый_Е)
+                for k, n in enumerate(arr[1]):
+                    if n.endswith('~'):
+                        arr[1][k] = arr[1][k].replace('~', '')
+                        if arr[1][k] in {'ть', 'ся'}:
+                            arr[1][k] = arr[1][k] + '_RS'
+                        elif arr[1][k] in check:
+                            arr[1][k] = arr[1][k] + '_S'
+                        elif arr[1][k] in morph_interfixes:
+                            arr[1][k] = arr[1][k] + '_I'
+                        elif arr[1][k] in morph_wordcreate:
+                            arr[1][k] = arr[1][k] + '_WC'
+                        elif arr[1][k] in suffs:
+                            arr[1][k] = arr[1][k] + '_SF'
+                        elif k > 0:
+                            arr[1][k] = arr[1][k] + '_E'
 
+                # определение составной приставки _P
                 if arr[1][0] in complex_pref.keys() and len(arr[1]) > 2 and arr[1][1] in complex_pref.get(arr[1][0]):
                     arr[1][0] = arr[1][0] + "_P"
                     arr[1][1] = arr[1][1] + "_P"
                 elif arr[1][0] in prefs:
                     arr[1][0] = arr[1][0] + "_P"
 
+                # определение приставки в сложных словах с распространенными корнями (авто, био ...) _CP
                 if arr[1][0] in complex_part:
                     for k in range(0, (len(arr[1]) + 1 ) // 2):
                         if arr[1][k] in prefs:
                             arr[1][k] = arr[1][k] + "_CP"
 
+                # определение возвратного суффикса _RS
                 for k in range(0, len(arr[1])):
                     if '_' not in arr[1][k] and arr[1][k] in {'ть', 'ся'}:
                         arr[1][k] = arr[1][k] + "_RS"
 
-                if '-' not in arr[1][-1] and len(arr[1]) > 1:
+                # определение окончания _E
+                if len(arr[1]) > 1:
                     arr[1][-1] = arr[1][-1] + "_E"
 
+                # определение суффикса среди суффиксов конкретной части речи _S
                 for k in range(1, len(arr[1])):
                     if '_' not in arr[1][k] and arr[1][k] in check:
                         arr[1][k] = arr[1][k] + "_S"
 
+                # определение морфемы среди словообразующих
+                for k in range(1, len(arr[1])):
+                    if '_' not in arr[1][k] and arr[1][k] in morph_wordcreate:
+                        arr[1][k] = arr[1][k] + "_WC"
+
+                # определение соединительного суффикса сложных слов - _I, а _SI - как I, но все-таки суффикс
                 for k in range(len(arr[1]) - 1, 0, -1):
                     if '_' not in arr[1][k] and arr[1][k] in morph_interfixes:
                         if re.search(r'(?:S|WC)', arr[1][k + 1]):
@@ -118,14 +147,12 @@ def parse(filename: str) -> None:
                             arr[1][k] = arr[1][k] + "_I"
                             complex_flag = True
 
-                for k in range(1, len(arr[1])):
-                    if '_' not in arr[1][k] and arr[1][k] in morph_wordcreate:
-                        arr[1][k] = arr[1][k] + "_WC"
-
+                # определение суффикса среди всех суффиксов русского языка
                 for k in range(1, len(arr[1])-1):
                     if '_' not in arr[1][k] and arr[1][k] in suffs:
                         arr[1][k] = arr[1][k] + "_SF"
 
+                # если каким-то чудом в словаре ь или ъ знаки отделены /
                 for k in range(1, len(arr[1])-1):
                     if '_' not in arr[1][k] and arr[1][k] in signs:
                         arr[1][k] = arr[1][k] + "_SIGN"
@@ -135,70 +162,76 @@ def parse(filename: str) -> None:
                         arr[1].remove('')
                     else:
                         break
-
                 count = 0
+                # подсчет непомеченных морфем
                 for w in arr[1]:
                     if '_' not in w:
                         count += 1
+
+                # определение приставки внутри слова
                 if count > 1:
                     for k in range(1, len(arr[1])):
                         if '_' not in arr[1][k] and arr[1][k] in prefs:
                             arr[1][k] = arr[1][k] + "_CP"
                             count -= 1
 
+                # пометили корень, нужно разметить обратно - поиск среди корней, совпадающих с приставками/суффиксами...
                 if count == 0:
-                    check_root(arr[1], count)
+                    count = check_root(arr[1], count)
 
                 if complex_flag and count < 2:
-                    check_root(arr[1], count)
+                    count = check_root(arr[1], count)
 
                 arr.append(count)
                 root_list = [i for i in arr[1] if '_' not in i] # список корней
-                copy_root_list = root_list[:] # копия списка корней, куда добавляется корень с чередованием
+                copy_root_list = set(root_list) # копия списка корней, куда добавляется корень с чередованием
 
                 # добавление корня с чередованием "ы" на "и"
                 for idx in range(1, len(arr[1])):
                     if arr[1][idx] in copy_root_list and 'P' in arr[1][idx - 1]:
                         pref_tmp = re.match(r'([\w]+)_', arr[1][idx - 1]).group(1)
                         if change_letter(pref_tmp, arr[1][idx][0]):
-                            copy_root_list.append('и' + arr[1][idx][1:])
-                copy_root_list = list(set(copy_root_list))
+                            copy_root_list.add('и' + arr[1][idx][1:])
 
-                changed_roots_1 = []
+                # добавление чередующихся корней из соотв. списка
+                changed_roots_1 = set()
                 for root in copy_root_list:
                     if root in change_roots.keys():
                         tmp = change_roots.get(root)
-                        changed_roots_1.append(tmp) if isinstance(tmp, str) else changed_roots_1.extend(tmp)
-                # copy_root_list.extend(changed_roots_1)
-                # copy_root_list = list(set(copy_root_list))
+                        changed_roots_1.add(tmp) if isinstance(tmp, str) else changed_roots_1.union(tmp)
 
-                changed_roots_2 = []
+                # добавление чередующихся корней с помощью проверки наиболее частотных чередований последних букв
+                changed_roots_2 = set()
                 for root in copy_root_list:
-                    if work_letter_change(letter_change, root[-1]):
-                        for group in work_letter_change(letter_change, root[-1]):
-                            for letter in group:
-                                root_check = root[:-1] + letter
-                                if root_check in all_roots_dict.get(root_check[0]):
-                                    changed_roots_2.append(root_check)
-                    if work_letter_change(letter_change, root[-2:]):
-                        for group in work_letter_change(letter_change, root[-2:]):
-                            for letter in group:
-                                root_check = root[:-2] + letter
-                                if root_check in all_roots_dict.get(root_check[0]):
-                                    changed_roots_2.append(root_check)
+                    if root not in not_change_roots:
+                        if work_letter_change(letter_change, root[-1]):
+                            for group in work_letter_change(letter_change, root[-1]):
+                                for letter in group:
+                                    root_check = root[:-1] + letter
+                                    if root_check in all_roots.get(root_check[0]):
+                                        changed_roots_2.add(root_check)
+                        if work_letter_change(letter_change, root[-2:]):
+                            for group in work_letter_change(letter_change, root[-2:]):
+                                for letter in group:
+                                    root_check = root[:-2] + letter
+                                    if root_check in all_roots.get(root_check[0]):
+                                        changed_roots_2.add(root_check)
 
-                copy_root_list.extend(changed_roots_1)
-                copy_root_list.extend(changed_roots_2)
-                copy_root_list = list(set(copy_root_list))
-                print(arr[0], copy_root_list)
+                copy_root_list = copy_root_list.union(set(changed_roots_1))
+                copy_root_list = copy_root_list.union(set(changed_roots_2))
+                # список корней с чередованием
+                other_roots = list(copy_root_list.difference(root_list))
+                # print(arr[0], copy_root_list, root_list)
 
+                # создание морфемного словаря morph_dict
                 if morph_dict.get(arr[0]):
-                    morph_dict[arr[0]].append([arr[1], root_list])
+                    morph_dict[arr[0]].append([arr[1], root_list, other_roots])
                 else:
-                    morph_dict[arr[0]] = [[arr[1], root_list]]
+                    morph_dict[arr[0]] = [arr[1], root_list, other_roots]
 
+                # создание корневых гнезд
                 for root in root_list:
-                    if CREATE_ROOTS:
+                    if CREATE_ROOTS: # создание словаря со всеми корнями all_roots
                         if all_roots.get(root[0]):
                             all_roots[root[0]].add(root)
                         else:
@@ -206,7 +239,10 @@ def parse(filename: str) -> None:
                     if roots_dict.get(root):
                         roots_dict[root].append((pos, count, arr[0], arr[1], root_list))
                     else:
-                        roots_dict[root] = [(pos, count, arr[0], arr[1], root_list)]
+                        roots_dict[root] = [[pos, count, arr[0], arr[1], root_list]]
+
+                if MANUAL and other_roots:
+                    manual_list.append([arr[0], root_list, other_roots])
 
             elif line == "START\n":
                 start = True
@@ -216,8 +252,23 @@ def parse(filename: str) -> None:
                     break
                 else:
                     i -= 1
+        if MANUAL:
+            with open("../dict/manual.txt", "w+") as file:
+                for i in manual_list:
+                    file.write(str(i) + '\n')
         if TEST:
+            ii = 0
+            for key, val in morph_dict.items():
+                print(key, val)
+                ii += 1
+                if ii == 5: break
+            print('-' * 50)
+            for key, val in roots_dict.items():
+                print(key, val)
+                ii -= 1
+                if ii == 0: break
             return
+
         if CREATE_ROOTS:
             for letter in all_roots.keys():
                 all_roots[letter] = list(all_roots.get(letter))
@@ -227,34 +278,42 @@ def parse(filename: str) -> None:
         write_json("../dict/complex_part.json", complex_part, ensure_ascii=False, indent=2)
 
 
-def check_root(arr: typing.List[typing.Any], count: int) -> None:
+def check_root(arr: typing.List[typing.Any], count: int) -> int:
     """Проверка среди помеченных морфем наличие корня
     :param arr: морфемы
     :param count: кол-во определенных корней"""
     for k in range(0, len(arr)):
-        root_check = arr[k][:arr[k].rfind('_')]
+        if '_' in arr[k]:
+            root_check = arr[k][:arr[k].rfind('_')]
+        else:
+            root_check = arr[k]
         if root_check in roots:
             arr[k] = root_check
-            count += 1
-            return
+            return count + 1
     for k in range(0, len(arr)):
-        root_check = arr[k][:arr[k].rfind('_')]
+        if '_' in arr[k]:
+            root_check = arr[k][:arr[k].rfind('_')]
+        else:
+            root_check = arr[k]
         if root_check in roots_as_pref:
             arr[k] = root_check
-            count += 1
-            return
+            return count + 1
     for k in range(0, len(arr)):
-        root_check = arr[k][:arr[k].rfind('_')]
+        if '_' in arr[k]:
+            root_check = arr[k][:arr[k].rfind('_')]
+        else:
+            root_check = arr[k]
         if root_check in roots_as_suff:
             arr[k] = root_check
-            count += 1
-            return
+            return count + 1
     for k in range(0, len(arr)):
-        root_check = arr[k][:arr[k].rfind('_')]
+        if '_' in arr[k]:
+            root_check = arr[k][:arr[k].rfind('_')]
+        else:
+            root_check = arr[k]
         if root_check in roots2:
             arr[k] = root_check
-            count += 1
-            return
+            return count + 1
 
 
 def read_json(path: str, **kwargs) -> str:
