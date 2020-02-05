@@ -2,8 +2,6 @@ import pymorphy2
 import logging
 import warnings
 import re
-import prefixes
-import suffixes
 import itertools
 import json
 import os
@@ -102,19 +100,25 @@ def flection(grammems, parsed):
     return result
 
 
-def transform_word(word, stat, grammems=None):
+def transform_word(word, stat, pos, grammems=None):
     """Склонение проверочного слова и проверка результата в словаре"""
     parsed = morph.parse(word)[0]
-    print("source word_transform: ", word, end=' | ')
-    result_word = flection(grammems, parsed)
+    print("source word_transform: ", word, f"--{parsed.tag.POS, pos}", end=' | ')
+    # result_word = flection(grammems, parsed)          if tags.POS in pos:
+    result_word = word
     good_word = False
 
     if result_word is None:
         stat["bad"] += 1
         print(' None')
-    elif not check_in_dict(result_word):
-        print("bad result: ", result_word)
+    elif parsed.tag.POS not in pos:
+        print("another POS: ", result_word)
         stat["bad"] += 1
+    elif not check_in_dict(result_word):
+        print("not in corpora: ", result_word)
+        stat["bad"] += 1
+        # stat["good"] += 1
+        good_word = True
     else:
         good_word = True
         print("good result: ", result_word)
@@ -163,12 +167,10 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                     if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
                                 check = [morphem[:morphem.find('_')] for morphem in rec[3] if re.search(re_expr, morphem)]
                                 if key in check:
-                                    if tags.POS in pos: # если ЧР совпадают - пытаемся просклонять
-                                        transformed_word = transform_word(rec[2], stat, tags)
-                                        if transformed_word[0]:
-                                            set_of_words.add(transformed_word[1])
-                                    else:               # иначе просто добавляем слово
-                                        set_of_words.add(rec[2])
+                                    transformed_word = transform_word(rec[2], stat, pos, tags)
+                                    if transformed_word[0]:
+                                        set_of_words.add(transformed_word[1])
+
             else:
                 for rec in vocab:
                     if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
@@ -179,12 +181,10 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                 flag = False
                                 break
                         if flag:  # and len(check) == len(key):
-                            if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
-                                transformed_word = transform_word(rec[2], stat, tags)
-                                if transformed_word[0]:
-                                    set_of_words.add(transformed_word[1])
-                            else:  # иначе просто добавляем слово
-                                set_of_words.add(rec[2])
+                            transformed_word = transform_word(rec[2], stat, pos, tags)
+                            if transformed_word[0]:
+                                set_of_words.add(transformed_word[1])
+
             if set_of_words:
                 tmp_dict[key] = set_of_words
     else:
@@ -200,12 +200,9 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                             check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
                                            re.search(type_dict.get('s'), morphem)]
                             if comb[0] in check_prefs and comb[1] in check_suffs:
-                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
-                                    transformed_word = transform_word(rec[2], stat, tags)
-                                    if transformed_word[0]:
-                                        set_of_words.add(transformed_word[1])
-                                else:  # иначе просто добавляем слово
-                                    set_of_words.add(rec[2])
+                                transformed_word = transform_word(rec[2], stat, pos, tags)
+                                if transformed_word[0]:
+                                    set_of_words.add(transformed_word[1])
                 elif isinstance(comb[0], str):
                     for rec in vocab:
                         if rec[1] == count and rec[0] in pos:
@@ -220,12 +217,9 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                     break
 
                             if flag and comb[0] in check_prefs:
-                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
-                                    transformed_word = transform_word(rec[2], stat, tags)
-                                    if transformed_word[0]:
-                                        set_of_words.add(transformed_word[1])
-                                else:  # иначе просто добавляем слово
-                                    set_of_words.add(rec[2])
+                                transformed_word = transform_word(rec[2], stat, pos, tags)
+                                if transformed_word[0]:
+                                    set_of_words.add(transformed_word[1])
                 elif isinstance(comb[1], str):
                     for rec in vocab:
                         if rec[1] == count and rec[0] in pos:
@@ -240,12 +234,9 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                     break
 
                             if flag and comb[1] in check_suffs:
-                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
-                                    transformed_word = transform_word(rec[2], stat, tags)
-                                    if transformed_word[0]:
-                                        set_of_words.add(transformed_word[1])
-                                else:  # иначе просто добавляем слово
-                                    set_of_words.add(rec[2])
+                                transformed_word = transform_word(rec[2], stat, pos, tags)
+                                if transformed_word[0]:
+                                    set_of_words.add(transformed_word[1])
                 else:
                     for rec in vocab:
                         if rec[1] == count and rec[0] in pos:
@@ -265,12 +256,9 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                     break
 
                             if flag_s and flag_p:
-                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
-                                    transformed_word = transform_word(rec[2], stat, tags)
-                                    if transformed_word[0]:
-                                        set_of_words.add(transformed_word[1])
-                                else:  # иначе просто добавляем слово
-                                    set_of_words.add(rec[2])
+                                transformed_word = transform_word(rec[2], stat, pos, tags)
+                                if transformed_word[0]:
+                                    set_of_words.add(transformed_word[1])
                 if set_of_words:
                     tmp_dict[key] = set_of_words
 
@@ -343,9 +331,11 @@ class Word:
         self.new_words_pref = []
         self.new_words_suf = []
         self.new_words_pref_suf = []
-        # new_pref = self.pref_relation('VERB', aliases.get('VERB'))
-        # new_suf = self.suf_relation('VERB', aliases.get('VERB'))
-        # new_pref_suf = self.pref_suf_relation('VERB', aliases.get('VERB'))
+
+        # self.new_words_pref.extend(self.pref_relation('ADVB', aliases.get('ADVB')).values())
+        # self.new_words_suf.extend(self.suf_relation('ADVB', aliases.get('ADVB')).values())
+        # self.new_words_pref_suf.extend(self.pref_suf_relation('ADVB', aliases.get('ADVB')).values())
+
         for pos in all_poses:
             self.new_words_pref.extend(self.pref_relation(pos, aliases.get(pos)).values())
             self.new_words_suf.extend(self.suf_relation(pos, aliases.get(pos)).values())
@@ -401,15 +391,11 @@ class Word:
 
     def pref_suf_relation(self, pos, aliases=None):
         prefs_sufs = []
-        meanings_dict = getattr(getattr(Morphems, self.tags.POS), "value")[2]
+        meanings_dict = getattr(getattr(Morphems, pos), "value")[2]
         for relation_value in meanings_dict.values():
             prefs_sufs.append((relation_value[1], relation_value[2]))
 
         prefs_sufs = set(prefs_sufs)
-        for i in prefs_sufs:
-            if isinstance(i, str) and hard_sign(i, self.normal[0]):
-                prefs_sufs.remove(i)
-                prefs_sufs.add(i + 'ъ')
 
         tmp = dict.fromkeys(prefs_sufs, [])
         create_final_dict(tmp, self.vocab, self.roots_count, aliases or pos, 'ps', self.stat, self.tags,
