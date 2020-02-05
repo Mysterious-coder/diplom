@@ -2,11 +2,13 @@ import pymorphy2
 import logging
 import warnings
 import re
-import meanings
 import prefixes
 import suffixes
+import itertools
 import json
 import os
+from enum import Enum
+from meanings import *
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -16,11 +18,46 @@ prefixes_1 = ('дез', 'контр', 'пан', 'пост', 'суб', 'супе�
 voiced_consonant = 'бвгджзлмнр'
 dumb_consonant = 'пкстфхцчшщ'
 type_dict = {
-    's': r'(?:RS|WC|SF|S)',
-    'p': r'(?:P|CP)',
-    'ps': r'(?:RS|WC|SF|S|P|CP)'
+    # 's': r'(?:RS|WC|SF|S|SI)',
+    # 'p': r'(?:P|CP)',
+    # 'ps': r'(?:RS|WC|SF|S|SI|P|CP)'
+    's': r'(?:S|WC)',
+    'p': r'P',
+    'ps': r'(?:S|WC|P)'
 }
 
+
+class Morphems(Enum):
+    ALL = ""
+    NOUN = (noun_pref, noun_suf, noun_pref_suf) # сущ
+    ADVB = (advb_pref, advb_suf, advb_pref_suf) # наречие
+    ADJF = (adj_pref, adj_suf, adj_pref_suf)    # полное/краткое/сравнительное прил
+    ADJS = (adj_pref, adj_suf, adj_pref_suf)
+    COMP = (adj_pref, adj_suf, adj_pref_suf)
+    VERB = (verb_pref, verb_suf, verb_pref_suf) # глагол, инфинитив
+    INFN = (verb_pref, verb_suf, verb_pref_suf)
+    PRTF = (prt_pref, prt_suf, prt_pref_suf)    # причастие
+    PRTS = (prt_pref, prt_suf, prt_pref_suf)
+    GRND = (grnd_pref, grnd_suf, grnd_pref_suf) # деепричастие
+    NUMR = ("", numr_suf)                           # числительное
+    NPRO = (npro_pref, npro_suf, npro_pref_suf) # местоимение
+    INTJ = ("", intj_suf)                           # междометие
+    PRED = ""
+    PREP = ""
+    CONJ = ""
+    PRCL = ""
+
+aliases = {
+    'VERB': ('VERB', 'INFN'),
+    'INFN': ('VERB', 'INFN'),
+    'ADJF': ('ADJF', 'ADJS', 'COMP'),
+    'ADJS': ('ADJF', 'ADJS', 'COMP'),
+    'COMP': ('ADJF', 'ADJS', 'COMP'),
+    'PRTF': ('PRTF', 'PRTS'),
+    'PRTS': ('PRTF', 'PRTS')
+}
+all_poses = ['NOUN', 'ADVB', 'ADJF', 'VERB', 'PRTF', 'GRND', 'NPRO']
+only_suf_poses = ['NUMR', 'INTJ']
 
 def read_json(path: str, **kwargs):
     """Чтение из json файла в словарь
@@ -117,46 +154,156 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
         return inapp_morphem
 
     re_expr = type_dict.get(exp)
-    for key in tmp_dict.keys():
-        arr = []
-        if not isinstance(key, tuple):
-            for rec in vocab:
-                if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
-                            check = [morphem[:morphem.find('_')] for morphem in rec[3] if re.search(re_expr, morphem)]
-                            if key in check:
+
+    if exp != 'ps':
+        for key in tmp_dict.keys():
+            set_of_words = set()
+            if not isinstance(key, tuple):
+                for rec in vocab:
+                    if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
+                                check = [morphem[:morphem.find('_')] for morphem in rec[3] if re.search(re_expr, morphem)]
+                                if key in check:
+                                    if tags.POS in pos: # если ЧР совпадают - пытаемся просклонять
+                                        transformed_word = transform_word(rec[2], stat, tags)
+                                        if transformed_word[0]:
+                                            set_of_words.add(transformed_word[1])
+                                    else:               # иначе просто добавляем слово
+                                        set_of_words.add(rec[2])
+            else:
+                for rec in vocab:
+                    if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
+                        check = [morphem[:morphem.find('_')] for morphem in rec[3] if re.search(re_expr, morphem)]
+                        flag = True
+                        for subkey in key:
+                            if subkey not in check:
+                                flag = False
+                                break
+                        if flag:  # and len(check) == len(key):
+                            if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
                                 transformed_word = transform_word(rec[2], stat, tags)
                                 if transformed_word[0]:
-                                    arr.append(transformed_word[1])
-        else:
-            for rec in vocab:
-                if rec[1] == count and rec[0] in pos and not app_morphem(rec[3]):
-                    check = [morphem[:morphem.find('_')] for morphem in rec[3] if re.search(re_expr, morphem)]
-                    flag = True
-                    for subkey in key:
-                        if subkey not in check:
-                            flag = False
-                            break
-                    if flag:  # and len(check) == len(key):
-                        transformed_word = transform_word(rec[2], stat, tags)
-                        if transformed_word[0]:
-                            arr.append(transformed_word[1])
-        tmp_dict[key] = arr
+                                    set_of_words.add(transformed_word[1])
+                            else:  # иначе просто добавляем слово
+                                set_of_words.add(rec[2])
+            if set_of_words:
+                tmp_dict[key] = set_of_words
+    else:
+        for key in tmp_dict.keys():
+            set_of_words = set()
+            combinations = itertools.product(key[0], key[1])
+            for comb in combinations:
+                if isinstance(comb[0], str) and isinstance(comb[1], str):
+                    for rec in vocab:
+                        if rec[1] == count and rec[0] in pos:
+                            check_prefs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('p'), morphem)]
+                            check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('s'), morphem)]
+                            if comb[0] in check_prefs and comb[1] in check_suffs:
+                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
+                                    transformed_word = transform_word(rec[2], stat, tags)
+                                    if transformed_word[0]:
+                                        set_of_words.add(transformed_word[1])
+                                else:  # иначе просто добавляем слово
+                                    set_of_words.add(rec[2])
+                elif isinstance(comb[0], str):
+                    for rec in vocab:
+                        if rec[1] == count and rec[0] in pos:
+                            check_prefs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('p'), morphem)]
+                            check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('s'), morphem)]
+                            flag = True
+                            for subkey in comb[1]:
+                                if subkey not in check_suffs:
+                                    flag = False
+                                    break
 
+                            if flag and comb[0] in check_prefs:
+                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
+                                    transformed_word = transform_word(rec[2], stat, tags)
+                                    if transformed_word[0]:
+                                        set_of_words.add(transformed_word[1])
+                                else:  # иначе просто добавляем слово
+                                    set_of_words.add(rec[2])
+                elif isinstance(comb[1], str):
+                    for rec in vocab:
+                        if rec[1] == count and rec[0] in pos:
+                            check_prefs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('p'), morphem)]
+                            check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('s'), morphem)]
+                            flag = True
+                            for subkey in comb[0]:
+                                if subkey not in check_prefs:
+                                    flag = False
+                                    break
 
-def create_relations(final_dict, mean_dict):
+                            if flag and comb[1] in check_suffs:
+                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
+                                    transformed_word = transform_word(rec[2], stat, tags)
+                                    if transformed_word[0]:
+                                        set_of_words.add(transformed_word[1])
+                                else:  # иначе просто добавляем слово
+                                    set_of_words.add(rec[2])
+                else:
+                    for rec in vocab:
+                        if rec[1] == count and rec[0] in pos:
+                            check_prefs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('p'), morphem)]
+                            check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
+                                           re.search(type_dict.get('s'), morphem)]
+                            flag_p = True
+                            for subkey in comb[0]:
+                                if subkey not in check_prefs:
+                                    flag_p = False
+                                    break
+                            flag_s = True
+                            for subkey in comb[1]:
+                                if subkey not in check_suffs:
+                                    flag_s = False
+                                    break
+
+                            if flag_s and flag_p:
+                                if tags.POS in pos:  # если ЧР исходного слова и необходимого совпадают - пытаемся просклонять
+                                    transformed_word = transform_word(rec[2], stat, tags)
+                                    if transformed_word[0]:
+                                        set_of_words.add(transformed_word[1])
+                                else:  # иначе просто добавляем слово
+                                    set_of_words.add(rec[2])
+                if set_of_words:
+                    tmp_dict[key] = set_of_words
+
+def create_relations(final_dict, mean_dict, ps=None):
     """Создание словаря ТИП_СВЯЗИ: СЛОВА"""
-    new_pref = dict.fromkeys(mean_dict.keys(), [])
-    for key in new_pref.keys():
-        arr = []
-        # if isinstance(mean_dict[key][1], str):
-        for morphem in mean_dict[key][1]:
-            val = final_dict.get(morphem)
-            if val is not None:
-                arr.append(val)
-        new_pref[key] = arr
 
-    print(new_pref)
-    return new_pref
+    new_relations = dict.fromkeys(mean_dict.keys(), [])
+    remove_keys = []
+    for key in new_relations.keys():
+        arr = set()
+        # if isinstance(mean_dict[key][1], str):
+        if ps is None:
+            for morphem in mean_dict[key][1]:
+                val = final_dict.get(morphem)
+                if val:
+                    arr.update(val)
+        else:
+            val = final_dict.get(tuple(mean_dict[key][1:]))
+            if val:
+                arr.update(val)
+        if any(arr):
+            new_relations[key] = arr
+        else:
+            remove_keys.append(key)
+
+    for key in remove_keys:
+        new_relations.pop(key)
+
+    for key in new_relations.keys():
+        new_relations[key] = [mean_dict.get(key)[0], new_relations[key]]
+
+    # print(new_relations)
+    return new_relations
 
 
 class Word:
@@ -168,13 +315,13 @@ class Word:
         self.word = variation.word
         self.normal = variation.normal_form
         self.parsed = morph_dict.get(self.normal)
-        print(self.parsed)
+        # print(self.parsed)
         self.roots = self.parsed[1]
         self.other_roots = self.parsed[2]
         self.roots_count = len(self.roots)
         self.vocab = []
         self.tags = variation.tag
-        # self.morph_count = len(self.parsed[0])
+
         for root in self.roots:
             a = [r for r in roots_dict.get(root) if r[1] == self.roots_count and set(r[4]) == set(self.roots)]
             self.vocab.extend(a)
@@ -182,46 +329,7 @@ class Word:
             a = [r for r in roots_dict.get(root) if r[1] == self.roots_count and
                  set(r[4]).issubset(set(self.other_roots).union(set(self.roots)))]
             self.vocab.extend(a)
-        self.new_words = []
-        self.inst = self.create_new()
 
-    def create_new(self):
-        """Вызов подкласса в зависимости от части речи"""
-        if self.tags.POS == 'NOUN':  # сущ
-            inst = Noun(self)
-        elif self.tags.POS in ('VERB', 'INFN'):  # глагол, инфинитив
-            inst = Verb(self)
-        elif self.tags.POS in ('ADJF', 'ADJS', 'COMP'):  # полное/краткое/сравнительное прил
-            inst = Adj(self)
-        elif self.tags.POS in ('PRTF', 'PRTS'):  # полное/краткое причастие
-            inst = Prt(self)
-        elif self.tags.POS == 'GRND':  # деепричастие
-            inst = Grnd(self)
-        elif self.tags.POS == 'NUMR':  # числительное
-            inst = Numr(self)
-        elif self.tags.POS == 'ADVB':  # наречие
-            inst = Advb(self)
-        elif self.tags.POS == 'NPRO':  # местоимение
-            inst = Npro(self)
-        elif self.tags.POS == 'INTJ':  # междометие
-            inst = Intj(self)
-
-        return inst
-
-
-class Verb(Word):
-    def __init__(self, word: Word):
-        print('in Verb')
-        self.stat = {"good": 0,
-                     "bad": 0}
-        self.word = word.word
-        self.normal = word.normal
-        self.roots = word.roots
-        self.parsed = word.parsed
-        self.roots_count = word.roots_count
-        self.vocab = word.vocab
-        self.tags = word.tags
-        self.new_pref_words = []
         self.word_pref = []  # префиксы слова
         self.word_suff = []  # суффиксы слова
         for i in self.parsed[0]:
@@ -230,16 +338,33 @@ class Verb(Word):
             elif re.search(type_dict.get('s'), i):
                 self.word_suff.append(i[:i.find('_')])
 
-        new_pref = self.pref_relation()
-        new_suff = self.suf_relation()
+        self.stat = {"good": 0,
+                     "bad": 0}
+        self.new_words_pref = []
+        self.new_words_suf = []
+        self.new_words_pref_suf = []
+        # new_pref = self.pref_relation('VERB', aliases.get('VERB'))
+        # new_suf = self.suf_relation('VERB', aliases.get('VERB'))
+        # new_pref_suf = self.pref_suf_relation('VERB', aliases.get('VERB'))
+        for pos in all_poses:
+            self.new_words_pref.extend(self.pref_relation(pos, aliases.get(pos)).values())
+            self.new_words_suf.extend(self.suf_relation(pos, aliases.get(pos)).values())
+            self.new_words_pref_suf.extend(self.pref_suf_relation(pos, aliases.get(pos)).values())
+        for pos in only_suf_poses:
+            self.new_words_suf.extend(self.suf_relation(pos, aliases.get(pos)).values())
 
-    def pref_relation(self):
+    def pref_relation(self, pos, aliases=None):
         """Создание префиксальной связи"""
-        prefs = prefixes.verb_prefixes.get("from_verb")
+        prefs = set()
+        meanings_dict = getattr(getattr(Morphems, pos), "value")[0]
 
-        for i in range(len(prefs)):
-            if isinstance(prefs[i], str) and hard_sign(prefs[i], self.normal[0]):
-                prefs[i] = prefs[i] + 'ъ'
+        for relation_value in meanings_dict.values():
+            prefs.update(relation_value[1])
+
+        for i in prefs:
+            if isinstance(i, str) and hard_sign(i, self.normal[0]):
+                prefs.remove(i)
+                prefs.add(i + 'ъ')
 
         tmp = dict.fromkeys(prefs, [])
         remove_keys = []
@@ -255,75 +380,44 @@ class Verb(Word):
         # a = json.dumps(self.vocab, ensure_ascii=False, indent=2)
         # print(a)
         # print(self.word_suff, self.word_pref)
-        create_final_dict(tmp, self.vocab, self.roots_count, ('VERB', 'INFN'), 'p', self.stat, self.tags,
+        create_final_dict(tmp, self.vocab, self.roots_count, aliases or pos, 'p', self.stat, self.tags,
                           suff=self.word_suff)
-        print(f"PREF_from_verb : {tmp}")
+        # print(f"P_{pos} : {tmp}")
 
-        return create_relations(tmp, meanings.verb_pref)
+        return create_relations(tmp, meanings_dict)
 
-    def suf_relation(self):
-        tmp = dict.fromkeys(suffixes.verb_suffixes.get("from_verb"), [])
-        create_final_dict(tmp, self.vocab, self.roots_count, ('VERB', 'INFN'), 's', self.stat, self.tags,
+    def suf_relation(self, pos, aliases=None):
+        suffs = set()
+        meanings_dict = getattr(getattr(Morphems, pos), "value")[1]
+        for relation_value in meanings_dict.values():
+            suffs.update(relation_value[1])
+
+        tmp = dict.fromkeys(suffs, [])
+        create_final_dict(tmp, self.vocab, self.roots_count, aliases or pos, 's', self.stat, self.tags,
                           pref=self.word_pref)
-        print(f"SUFF_from_verb : {tmp}")
+        # print(f"S_{pos} : {tmp}")
 
-        return create_relations(tmp, meanings.verb_pref)
+        return create_relations(tmp, meanings_dict)
 
+    def pref_suf_relation(self, pos, aliases=None):
+        prefs_sufs = []
+        meanings_dict = getattr(getattr(Morphems, self.tags.POS), "value")[2]
+        for relation_value in meanings_dict.values():
+            prefs_sufs.append((relation_value[1], relation_value[2]))
 
-class Noun(Word):
-    def __init__(self, word: Word):
-        print('in Noun')
-        self.stat = {"good": 0,
-                     "bad": 0}
-        self.word = word.word
-        self.tags = word.tags
-        self.new_pref_words = dict.fromkeys(meanings.verb_pref.keys(), [])
-        # new_pref = self.pref_relation()
-        # print(f"NEW_PREF : {new_pref}")
-        # print(self.stat)
-        pass
+        prefs_sufs = set(prefs_sufs)
+        for i in prefs_sufs:
+            if isinstance(i, str) and hard_sign(i, self.normal[0]):
+                prefs_sufs.remove(i)
+                prefs_sufs.add(i + 'ъ')
 
+        tmp = dict.fromkeys(prefs_sufs, [])
+        create_final_dict(tmp, self.vocab, self.roots_count, aliases or pos, 'ps', self.stat, self.tags,
+                          pref=self.word_pref)
+        # print(f"PS_{pos} : {tmp}")
 
-class Adj(Word):
-    def __init__(self, word: Word):
-        print('in Adj')
-        pass
+        return create_relations(tmp, meanings_dict, True)
 
-
-class Prt(Word):
-    def __init__(self, word: Word):
-        print('in Prt')
-        pass
-
-
-class Grnd(Word):
-    def __init__(self, word: Word):
-        print('in Grnd')
-        pass
-
-
-class Numr(Word):
-    def __init__(self, word: Word):
-        print('in Numr')
-        pass
-
-
-class Advb(Word):
-    def __init__(self, word: Word):
-        print('in Advb')
-        pass
-
-
-class Npro(Word):
-    def __init__(self, word: Word):
-        print('in Npro')
-        pass
-
-
-class Intj(Word):
-    def __init__(self, word: Word):
-        print('in Intj')
-        pass
 
 # .is_known
 
@@ -340,9 +434,15 @@ def main():
     variation = parsed[0]
     # for variation in parsed:
     if variation.is_known:
-       print(variation)
+       # print(variation)
        instance = Word(variation)
-       print(instance.inst.stat)
+       print(instance.stat)
+       for w in instance.new_words_pref:
+           print(w)
+       for w in instance.new_words_suf:
+           print(w)
+       for w in instance.new_words_pref_suf:
+           print(w)
     else:
         print("Incorrect word!")
 

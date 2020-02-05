@@ -15,9 +15,10 @@ suffs = a
 
 signs = {'ъ', 'ь'}
 
-TEST = True
+TEST = False
 CREATE_ROOTS = False
-MANUAL = False
+MANUAL = True
+
 
 class Check(Enum):
     ALL = suffs
@@ -40,8 +41,10 @@ class Check(Enum):
     PRCL = ""
     INTJ = ""
 
+
 aplhabet = ('а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п',
             'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ы', 'э', 'ю', 'я')
+
 
 def parse(filename: str) -> None:
     with open(filename, 'r') as file:
@@ -85,7 +88,7 @@ def parse(filename: str) -> None:
                 pos = parsed.tag.POS
                 if pos is None: pos = "ALL"
                 try:
-                    check = getattr(getattr(Check, pos),"value")
+                    check = getattr(getattr(Check, pos), "value")
                 except:
                     logging.exception(f'getattr----------{pos}')
 
@@ -141,7 +144,7 @@ def parse(filename: str) -> None:
                 # определение соединительного суффикса сложных слов - _I, а _SI - как I, но все-таки суффикс
                 for k in range(len(arr[1]) - 1, 0, -1):
                     if '_' not in arr[1][k] and arr[1][k] in morph_interfixes:
-                        if re.search(r'(?:S|WC)', arr[1][k + 1]):
+                        if re.search(r'(?:S|WC|E)', arr[1][k + 1]):
                             arr[1][k] = arr[1][k] + "_SI"
                         else:
                             arr[1][k] = arr[1][k] + "_I"
