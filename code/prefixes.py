@@ -14,10 +14,6 @@ verb_prefixes = {
                   'пре', 'пред', 'предо', 'разо']
 }
 
-numr_prefixes = {
-
-}
-
 npro_prefixes = {
     'from_npro': ['ни', 'не', 'кое', 'кой']
 }

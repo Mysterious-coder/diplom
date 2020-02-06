@@ -10,15 +10,13 @@ from meanings import *
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+CONSIDER_POS = True
 vowels = 'ауоыиэяюёе'
 vowels_1 = 'еёюя'
 prefixes_1 = ('дез', 'контр', 'пан', 'пост', 'суб', 'супер', 'транс', 'ак', 'сверх', 'меж', 'интер', 'экс')
 voiced_consonant = 'бвгджзлмнр'
 dumb_consonant = 'пкстфхцчшщ'
 type_dict = {
-    # 's': r'(?:RS|WC|SF|S|SI)',
-    # 'p': r'(?:P|CP)',
-    # 'ps': r'(?:RS|WC|SF|S|SI|P|CP)'
     's': r'(?:S|WC)',
     'p': r'P',
     'ps': r'(?:S|WC|P)'
@@ -169,7 +167,7 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                 if key in check:
                                     transformed_word = transform_word(rec[2], stat, pos, tags)
                                     if transformed_word[0]:
-                                        set_of_words.add(transformed_word[1])
+                                        set_of_words.add((transformed_word[1], rec[0]))
 
             else:
                 for rec in vocab:
@@ -183,7 +181,7 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                         if flag:  # and len(check) == len(key):
                             transformed_word = transform_word(rec[2], stat, pos, tags)
                             if transformed_word[0]:
-                                set_of_words.add(transformed_word[1])
+                                set_of_words.add((transformed_word[1], rec[0]))
 
             if set_of_words:
                 tmp_dict[key] = set_of_words
@@ -191,6 +189,7 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
         for key in tmp_dict.keys():
             set_of_words = set()
             combinations = itertools.product(key[0], key[1])
+
             for comb in combinations:
                 if isinstance(comb[0], str) and isinstance(comb[1], str):
                     for rec in vocab:
@@ -202,7 +201,8 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                             if comb[0] in check_prefs and comb[1] in check_suffs:
                                 transformed_word = transform_word(rec[2], stat, pos, tags)
                                 if transformed_word[0]:
-                                    set_of_words.add(transformed_word[1])
+                                    set_of_words.add((transformed_word[1], rec[0]))
+
                 elif isinstance(comb[0], str):
                     for rec in vocab:
                         if rec[1] == count and rec[0] in pos:
@@ -210,16 +210,14 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                            re.search(type_dict.get('p'), morphem)]
                             check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
                                            re.search(type_dict.get('s'), morphem)]
-                            flag = True
-                            for subkey in comb[1]:
-                                if subkey not in check_suffs:
-                                    flag = False
-                                    break
 
-                            if flag and comb[0] in check_prefs:
+                            flag_s = all(subkey in check_suffs for subkey in comb[1])
+
+                            if flag_s and comb[0] in check_prefs:
                                 transformed_word = transform_word(rec[2], stat, pos, tags)
                                 if transformed_word[0]:
-                                    set_of_words.add(transformed_word[1])
+                                    set_of_words.add((transformed_word[1], rec[0]))
+
                 elif isinstance(comb[1], str):
                     for rec in vocab:
                         if rec[1] == count and rec[0] in pos:
@@ -227,16 +225,13 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                            re.search(type_dict.get('p'), morphem)]
                             check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
                                            re.search(type_dict.get('s'), morphem)]
-                            flag = True
-                            for subkey in comb[0]:
-                                if subkey not in check_prefs:
-                                    flag = False
-                                    break
 
-                            if flag and comb[1] in check_suffs:
+                            flag_p = all(subkey in check_prefs for subkey in comb[0])
+
+                            if flag_p and comb[1] in check_suffs:
                                 transformed_word = transform_word(rec[2], stat, pos, tags)
                                 if transformed_word[0]:
-                                    set_of_words.add(transformed_word[1])
+                                    set_of_words.add((transformed_word[1], rec[0]))
                 else:
                     for rec in vocab:
                         if rec[1] == count and rec[0] in pos:
@@ -244,25 +239,18 @@ def create_final_dict(tmp_dict, vocab, count, pos, exp, stat, tags, pref=None, s
                                            re.search(type_dict.get('p'), morphem)]
                             check_suffs = [morphem[:morphem.find('_')] for morphem in rec[3] if
                                            re.search(type_dict.get('s'), morphem)]
-                            flag_p = True
-                            for subkey in comb[0]:
-                                if subkey not in check_prefs:
-                                    flag_p = False
-                                    break
-                            flag_s = True
-                            for subkey in comb[1]:
-                                if subkey not in check_suffs:
-                                    flag_s = False
-                                    break
+
+                            flag_p = all(subkey in check_prefs for subkey in comb[0])
+                            flag_s = all(subkey in check_suffs for subkey in comb[1])
 
                             if flag_s and flag_p:
                                 transformed_word = transform_word(rec[2], stat, pos, tags)
                                 if transformed_word[0]:
-                                    set_of_words.add(transformed_word[1])
+                                    set_of_words.add((transformed_word[1], rec[0]))
                 if set_of_words:
                     tmp_dict[key] = set_of_words
 
-def create_relations(final_dict, mean_dict, ps=None):
+def create_relations(final_dict, mean_dict, tagpos, ps=None):
     """Создание словаря ТИП_СВЯЗИ: СЛОВА"""
 
     new_relations = dict.fromkeys(mean_dict.keys(), [])
@@ -287,10 +275,37 @@ def create_relations(final_dict, mean_dict, ps=None):
     for key in remove_keys:
         new_relations.pop(key)
 
-    for key in new_relations.keys():
-        new_relations[key] = [mean_dict.get(key)[0], new_relations[key]]
+    if not CONSIDER_POS:
+        for key in new_relations.keys():
+            new_relations[key] = [mean_dict.get(key)[0], new_relations[key]]
+    else:
+        remove_keys = []
+        if isinstance(tagpos, str):
+            tagpos = [tagpos]
 
-    # print(new_relations)
+        for key in new_relations.keys():
+            brackets = re.match(r'\[([?:\w|+]*)\]', mean_dict.get(key)[0]).group(1)
+            if brackets == '':
+                new_relations[key] = [mean_dict.get(key)[0], new_relations[key]]
+            else:
+                flag = any(it in brackets for it in tagpos)
+                flag_common = any(it in brackets for it in all_poses + only_suf_poses)
+
+                if flag and '+' in brackets:
+                    brackets = brackets.split('+')
+                    a = {k for k in new_relations[key] if any(it in k for it in tagpos)}
+                    new_relations[key] = [mean_dict.get(key)[0], a]
+                elif flag:
+                    a = {k for k in new_relations[key] if brackets in tagpos}
+                    new_relations[key] = [mean_dict.get(key)[0], a]
+                elif not flag_common:
+                    new_relations[key] = [mean_dict.get(key)[0], new_relations[key]]
+                else:
+                    print(f"LOOK {mean_dict.get(key)[0], new_relations[key]}")
+                    remove_keys.append(key)
+        for key in remove_keys:
+            new_relations.pop(key)
+
     return new_relations
 
 
@@ -343,7 +358,7 @@ class Word:
         for pos in only_suf_poses:
             self.new_words_suf.extend(self.suf_relation(pos, aliases.get(pos)).values())
 
-    def pref_relation(self, pos, aliases=None):
+    def pref_relation(self, pos, alias=None):
         """Создание префиксальной связи"""
         prefs = set()
         meanings_dict = getattr(getattr(Morphems, pos), "value")[0]
@@ -370,26 +385,26 @@ class Word:
         # a = json.dumps(self.vocab, ensure_ascii=False, indent=2)
         # print(a)
         # print(self.word_suff, self.word_pref)
-        create_final_dict(tmp, self.vocab, self.roots_count, aliases or pos, 'p', self.stat, self.tags,
+        create_final_dict(tmp, self.vocab, self.roots_count, alias or pos, 'p', self.stat, self.tags,
                           suff=self.word_suff)
         # print(f"P_{pos} : {tmp}")
 
-        return create_relations(tmp, meanings_dict)
+        return create_relations(tmp, meanings_dict, aliases.get(self.tags.POS) or self.tags.POS)
 
-    def suf_relation(self, pos, aliases=None):
+    def suf_relation(self, pos, alias=None):
         suffs = set()
         meanings_dict = getattr(getattr(Morphems, pos), "value")[1]
         for relation_value in meanings_dict.values():
             suffs.update(relation_value[1])
 
         tmp = dict.fromkeys(suffs, [])
-        create_final_dict(tmp, self.vocab, self.roots_count, aliases or pos, 's', self.stat, self.tags,
+        create_final_dict(tmp, self.vocab, self.roots_count, alias or pos, 's', self.stat, self.tags,
                           pref=self.word_pref)
         # print(f"S_{pos} : {tmp}")
 
-        return create_relations(tmp, meanings_dict)
+        return create_relations(tmp, meanings_dict, aliases.get(self.tags.POS) or self.tags.POS)
 
-    def pref_suf_relation(self, pos, aliases=None):
+    def pref_suf_relation(self, pos, alias=None):
         prefs_sufs = []
         meanings_dict = getattr(getattr(Morphems, pos), "value")[2]
         for relation_value in meanings_dict.values():
@@ -398,11 +413,11 @@ class Word:
         prefs_sufs = set(prefs_sufs)
 
         tmp = dict.fromkeys(prefs_sufs, [])
-        create_final_dict(tmp, self.vocab, self.roots_count, aliases or pos, 'ps', self.stat, self.tags,
+        create_final_dict(tmp, self.vocab, self.roots_count, alias or pos, 'ps', self.stat, self.tags,
                           pref=self.word_pref)
         # print(f"PS_{pos} : {tmp}")
 
-        return create_relations(tmp, meanings_dict, True)
+        return create_relations(tmp, meanings_dict, aliases.get(self.tags.POS) or self.tags.POS, True)
 
 
 # .is_known
