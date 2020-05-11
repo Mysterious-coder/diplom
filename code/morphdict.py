@@ -5,7 +5,8 @@ from enum import Enum
 from prefixes import prefs, complex_pref
 from roots import *
 from suffixes import *
-from main import vowels, prefixes_1
+from copy import copy
+from constants import vowels, prefixes_1, signs, alphabet
 
 suffs = [set(i) for i in (suff_advb, suff_adj, suff_noun, suff_name, suff_verb, morph_wordcreate, morph_wordchange)]
 a = set()
@@ -13,11 +14,10 @@ for i in suffs:
     a = a | i
 suffs = a
 
-signs = {'ъ', 'ь'}
-
 TEST = False
-CREATE_ROOTS = False
-MANUAL = True
+CREATE_ROOTS = False    # создание словаря со всеми корнями all_roots
+MANUAL = False           # словарь для ручной проверки
+ML = True               # словарь для ml
 
 
 class Check(Enum):
@@ -42,23 +42,27 @@ class Check(Enum):
     INTJ = ""
 
 
-aplhabet = ('а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п',
-            'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ы', 'э', 'ю', 'я')
+def parse(filename: str, only_word=False):
+    if only_word:
+        TEST = False
+        CREATE_ROOTS = False  # создание словаря со всеми корнями all_roots
+        MANUAL = False  # словарь для ручной проверки
+        ML = False
 
-
-def parse(filename: str) -> None:
     with open(filename, 'r') as file:
         start = False
         if TEST:
             i = 500
         if CREATE_ROOTS:
-            all_roots = dict.fromkeys(aplhabet, set())
+            all_roots = dict.fromkeys(alphabet, set())
         else:
             all_roots = read_json('../dict/all_roots.json')
         complex_part = []
         manual_list = []
         morph_dict = {}
         roots_dict = {}
+        ml_dict = {}
+
         for line in file.readlines():
             if start:
                 complex_flag = False
@@ -91,6 +95,14 @@ def parse(filename: str) -> None:
                     check = getattr(getattr(Check, pos), "value")
                 except:
                     logging.exception(f'getattr----------{pos}')
+
+                if ML and ml_dict.get(arr[0]) is None:
+                    copy_arr = copy(arr[1])
+                    for idx, item in enumerate(copy_arr):
+                        copy_arr[idx] = item.replace('~', '')
+                    if copy_arr[-1] == '':
+                        copy_arr[-1] = '_E'
+                    ml_dict[arr[0]] = [copy_arr]
 
                 # определение морфемы перед '-' (который-нибудь : ый_Е)
                 for k, n in enumerate(arr[1]):
@@ -232,6 +244,14 @@ def parse(filename: str) -> None:
                 else:
                     morph_dict[arr[0]] = [arr[1], root_list, other_roots]
 
+                # создание словаря для ml
+                if ML:
+                    copy_arr = copy(arr[1])
+                    for idx, item in enumerate(copy_arr):
+                        if '_' not in item:
+                            copy_arr[idx] = item + '_ROOT'
+                    ml_dict[arr[0]].append(copy_arr)
+                    ml_dict[arr[0]].append(pos)
                 # создание корневых гнезд
                 for root in root_list:
                     if CREATE_ROOTS: # создание словаря со всеми корнями all_roots
@@ -272,13 +292,19 @@ def parse(filename: str) -> None:
                 if ii == 0: break
             return
 
+        if ML:
+            write_json("../dict/ml_dict.json", ml_dict, ensure_ascii=False, indent=2)
+
         if CREATE_ROOTS:
             for letter in all_roots.keys():
                 all_roots[letter] = list(all_roots.get(letter))
             write_json("../dict/all_roots.json", all_roots, ensure_ascii=False, indent=2)
-        write_json("../dict/morph_dict.json", morph_dict, ensure_ascii=False, indent=2)
-        write_json("../dict/roots_dict.json", roots_dict, ensure_ascii=False, indent=2)
-        write_json("../dict/complex_part.json", complex_part, ensure_ascii=False, indent=2)
+        if not only_word:
+            write_json("../dict/morph_dict.json", morph_dict, ensure_ascii=False, indent=2)
+            write_json("../dict/roots_dict.json", roots_dict, ensure_ascii=False, indent=2)
+            write_json("../dict/complex_part.json", complex_part, ensure_ascii=False, indent=2)
+        else:
+            return morph_dict, roots_dict, complex_part
 
 
 def check_root(arr: typing.List[typing.Any], count: int) -> int:
@@ -349,8 +375,8 @@ def change_letter(pref: str, letter: str) -> bool:
 
 
 morph = pymorphy2.MorphAnalyzer()
-
-if TEST:
-    parse("../dict/test.txt")
-else:
-    parse("../dict/MorphDictTikhonov.txt")
+#
+# if TEST:
+#     parse("../dict/test.txt")
+# else:
+#     parse("../dict/MorphDictTikhonov.txt")
